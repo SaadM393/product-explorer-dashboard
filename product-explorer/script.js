@@ -3,6 +3,9 @@ const MAX_HISTORY = 5;
 
 let allProducts = [];       // flat list of every product
 let recentlyViewed = [];    // newest product is at index 0
+let cart = [];              // each cart item stores a product and its quantity
+let undoStack = [];          // previous cart actions
+let redoStack = [];          // actions that can be applied again
 
 // ---------- Page elements ----------
 const productGrid = document.getElementById("productGrid");
@@ -11,6 +14,10 @@ const clearHistoryBtn = document.getElementById("clearHistoryBtn");
 const modalOverlay = document.getElementById("modalOverlay");
 const modalContent = document.getElementById("modalContent");
 const closeModalBtn = document.getElementById("closeModalBtn");
+const cartItemsContainer = document.getElementById("cartItems");
+const cartTotal = document.getElementById("cartTotal");
+const undoBtn = document.getElementById("undoBtn");
+const redoBtn = document.getElementById("redoBtn");
 
 // ---------- Data ----------
 // data.js groups products by category, so we collect them into one flat array.
@@ -86,12 +93,20 @@ function createProductCard(product) {
   card.appendChild(rating);
 
   const button = document.createElement("button");
-  button.className = "btn";
-  button.textContent = "View Product";
+  button.className = "btn btn-ghost add-to-cart-btn";
+  button.textContent = "Add to Cart";
   button.addEventListener("click", function () {
-    viewProduct(product.id);
+    addToCart(product.id);
   });
   card.appendChild(button);
+
+  const viewButton = document.createElement("button");
+  viewButton.className = "btn";
+  viewButton.textContent = "View Product";
+  viewButton.addEventListener("click", function () {
+    viewProduct(product.id);
+  });
+  card.appendChild(viewButton);
 
   return card;
 }
@@ -179,6 +194,130 @@ function clearHistory() {
   displayRecentlyViewed();
 }
 
+// ---------- Cart and undo/redo stacks ----------
+function getCartQuantity(productId) {
+  const item = cart.find(function (cartItem) {
+    return cartItem.product.id === productId;
+  });
+  return item ? item.quantity : 0;
+}
+
+function changeCartQuantity(productId, newQuantity) {
+  const product = allProducts.find(function (item) {
+    return item.id === productId;
+  });
+  if (!product) return;
+
+  const previousQuantity = getCartQuantity(productId);
+  if (previousQuantity === newQuantity) return;
+
+  // Store both quantities so Undo and Redo can restore either state.
+  undoStack.push({
+    productId: productId,
+    previousQuantity: previousQuantity,
+    newQuantity: newQuantity
+  });
+  // A new action starts a new history, so old redo actions are discarded.
+  redoStack = [];
+  applyCartQuantity(productId, newQuantity);
+}
+
+function applyCartQuantity(productId, quantity) {
+  const product = allProducts.find(function (item) {
+    return item.id === productId;
+  });
+  if (!product) return;
+
+  const item = cart.find(function (cartItem) {
+    return cartItem.product.id === productId;
+  });
+
+  if (quantity <= 0) {
+    cart = cart.filter(function (cartItem) {
+      return cartItem.product.id !== productId;
+    });
+  } else if (item) {
+    item.quantity = quantity;
+  } else {
+    cart.push({ product: product, quantity: quantity });
+  }
+
+  displayCart();
+}
+
+function addToCart(productId) {
+  changeCartQuantity(productId, getCartQuantity(productId) + 1);
+}
+
+function removeFromCart(productId) {
+  if (getCartQuantity(productId) > 0) {
+    changeCartQuantity(productId, 0);
+  }
+}
+
+function undoCartAction() {
+  if (undoStack.length === 0) return;
+
+  const action = undoStack.pop();
+  redoStack.push(action);
+  applyCartQuantity(action.productId, action.previousQuantity);
+}
+
+function redoCartAction() {
+  if (redoStack.length === 0) return;
+
+  const action = redoStack.pop();
+  undoStack.push(action);
+  applyCartQuantity(action.productId, action.newQuantity);
+}
+
+function displayCart() {
+  cartItemsContainer.innerHTML = "";
+  let total = 0;
+
+  if (cart.length === 0) {
+    cartItemsContainer.innerHTML = '<p class="empty-state">Your cart is empty.</p>';
+  } else {
+    cart.forEach(function (cartItem) {
+      const product = cartItem.product;
+      const row = document.createElement("div");
+      row.className = "cart-item";
+      row.appendChild(createMedia(product));
+
+      const details = document.createElement("div");
+      details.className = "cart-item-details";
+
+      const name = document.createElement("strong");
+      name.textContent = product.name;
+      details.appendChild(name);
+
+      const quantity = document.createElement("span");
+      quantity.textContent = "Quantity: " + cartItem.quantity;
+      details.appendChild(quantity);
+
+      const subtotal = document.createElement("span");
+      subtotal.textContent = formatPrice(product.price) + " each";
+      details.appendChild(subtotal);
+      row.appendChild(details);
+
+      const removeButton = document.createElement("button");
+      removeButton.className = "btn btn-ghost remove-from-cart-btn";
+      removeButton.textContent = "Remove";
+      removeButton.addEventListener("click", function () {
+        removeFromCart(product.id);
+      });
+      row.appendChild(removeButton);
+
+      cartItemsContainer.appendChild(row);
+      total += product.price * cartItem.quantity;
+    });
+  }
+
+  cartTotal.textContent = formatPrice(total);
+  undoBtn.disabled = undoStack.length === 0;
+  redoBtn.disabled = redoStack.length === 0;
+}
+
 // ---------- Modal ----------
 function showProductDetails(product) {
   modalContent.innerHTML = "";
@@ -217,6 +356,8 @@ function closeModal() {
 // ---------- Events ----------
 clearHistoryBtn.addEventListener("click", clearHistory);
 closeModalBtn.addEventListener("click", closeModal);
+undoBtn.addEventListener("click", undoCartAction);
+redoBtn.addEventListener("click", redoCartAction);
 
 // Click on the dark area outside the modal box closes it
 modalOverlay.addEventListener("click", function (event) {
@@ -235,3 +376,4 @@ document.addEventListener("keydown", function (event) {
 allProducts = getAllProducts();
 displayProducts();
 displayRecentlyViewed();
+displayCart();
